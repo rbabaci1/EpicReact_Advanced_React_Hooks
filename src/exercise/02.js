@@ -10,7 +10,25 @@ import {
   PokemonErrorBoundary,
 } from '../pokemon'
 
-// 🐨 this is going to be our generic asyncReducer
+function useSafeDispatch(dispatch) {
+  const mountedRef = React.useRef(false)
+
+  React.useEffect(() => {
+    mountedRef.current = true
+
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  return React.useCallback(
+    (...args) => {
+      mountedRef.current && dispatch(...args)
+    },
+    [dispatch],
+  )
+}
+
 function asyncReducer(state, action) {
   switch (action.type) {
     case 'pending': {
@@ -28,63 +46,47 @@ function asyncReducer(state, action) {
   }
 }
 
-function useAsync(asyncCallback, initialState, dependencies) {
-  const [state, dispatch] = React.useReducer(asyncReducer, {
+function useAsync(initialState) {
+  const [state, unsafeDispatch] = React.useReducer(asyncReducer, {
     status: 'idle',
     data: null,
     error: null,
     ...initialState,
   })
+  const dispatch = useSafeDispatch(unsafeDispatch)
 
-  const [pokemonName] = dependencies
+  const run = React.useCallback(
+    promise => {
+      if (!promise) return
 
-  React.useEffect(() => {
-    // 💰 this first early-exit bit is a little tricky, so let me give you a hint:
-    const promise = asyncCallback()
-    if (!promise) {
-      return
-    }
-    // then you can dispatch and handle the promise etc...
-    if (!pokemonName) {
-      return
-    }
-    dispatch({type: 'pending'})
+      dispatch({type: 'pending'})
+      promise.then(
+        data => {
+          dispatch({type: 'resolved', data})
+        },
+        error => {
+          dispatch({type: 'rejected', error})
+        },
+      )
+    },
+    [dispatch],
+  )
 
-    promise().then(
-      data => {
-        dispatch({type: 'resolved', data})
-      },
-      error => {
-        dispatch({type: 'rejected', error})
-      },
-    )
-    // 🐨 you'll accept dependencies as an array and pass that here.
-    // 🐨 because of limitations with ESLint, you'll need to ignore
-    // the react-hooks/exhaustive-deps rule. We'll fix this in an extra credit.
-  }, dependencies)
-
-  return state
+  return [state, run]
 }
 
 function PokemonInfo({pokemonName}) {
-  const asyncCallback = React.useCallback(() => {
-    return () => {
-      if (!pokemonName) {
-        return
-      }
-      return fetchPokemon(pokemonName)
-    }
-  }, [pokemonName])
-  // 🐨 move both the useReducer and useEffect hooks to a custom hook called useAsync
-  // here's how you use it:
-  const state = useAsync(
-    asyncCallback,
-    {status: pokemonName ? 'pending' : 'idle'},
-    [pokemonName],
-  )
+  const [state, run] = useAsync({
+    status: pokemonName ? 'pending' : 'idle',
+  })
 
-  // 🐨 this will change from "pokemon" to "data"
-  const {data, status, error} = state
+  const {status, data: pokemon, error} = state
+
+  React.useEffect(() => {
+    if (!pokemonName) return
+
+    return run(fetchPokemon(pokemonName))
+  }, [pokemonName, run])
 
   if (status === 'idle' || !pokemonName) {
     return 'Submit a pokemon'
@@ -93,7 +95,7 @@ function PokemonInfo({pokemonName}) {
   } else if (status === 'rejected') {
     throw error
   } else if (status === 'resolved') {
-    return <PokemonDataView pokemon={data} />
+    return <PokemonDataView pokemon={pokemon} />
   }
 
   throw new Error('This should be impossible')
@@ -125,6 +127,7 @@ function App() {
 
 function AppWithUnmountCheckbox() {
   const [mountApp, setMountApp] = React.useState(true)
+
   return (
     <div>
       <label>

@@ -15,14 +15,10 @@ const useCount = () => {
   return context
 }
 
-function CountProvider({children}) {
+function CountProvider(props) {
   const [count, setCount] = React.useState(0)
 
-  return (
-    <CountContext.Provider value={[count, setCount]}>
-      {children}
-    </CountContext.Provider>
-  )
+  return <CountContext.Provider value={[count, setCount]} {...props} />
 }
 
 function CountDisplay() {
